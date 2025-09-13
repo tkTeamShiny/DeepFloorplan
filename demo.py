@@ -10,43 +10,45 @@ from PIL import Image
 
 def imresize(img, size, interp='bilinear', mode=None):
     """
-    A lightweight imresize compatible with the old API:
-      - size: float(倍率) or (H, W)
+    Compatible with legacy scipy.misc.imresize:
+      - size: float scale, (H, W), or (H, W, C). If C is given, it's ignored (shape check only).
       - interp: 'nearest' | 'bilinear' | 'bicubic' | 'lanczos'
-    dtype/範囲は元配列に合わせて返します（float→[0,1]、整数→整数）。
+    Returns in the same dtype/range as input.
     """
-    # --- to PIL image (uint8, proper mode) ---
     orig_dtype = img.dtype
-    if img.ndim == 2:
-        pil_mode = 'L'
-    elif img.ndim == 3 and img.shape[2] == 3:
-        pil_mode = 'RGB'
-    elif img.ndim == 3 and img.shape[2] == 4:
-        pil_mode = 'RGBA'
-    else:
-        # それ以外の形状は未対応（必要なら拡張してください）
-        raise ValueError(f"Unsupported image shape for imresize: {img.shape}")
 
+    # Convert to uint8 for PIL
     if np.issubdtype(orig_dtype, np.floating):
         src = np.clip(img, 0.0, 1.0) * 255.0
         src = src.astype(np.uint8)
     else:
         src = np.clip(img, 0, 255).astype(np.uint8)
 
-    pil_img = Image.fromarray(src, mode=pil_mode)
+    # Let Pillow infer mode (avoids deprecation of 'mode=' arg)
+    pil_img = Image.fromarray(src)
 
-    # --- resolve target size ---
+    # Resolve target size
     if isinstance(size, (int, float)):
         new_w = int(round(pil_img.width * float(size)))
         new_h = int(round(pil_img.height * float(size)))
         target = (new_w, new_h)
-    elif isinstance(size, (tuple, list)) and len(size) == 2:
-        # old imresize は (H, W)。Pillow は (W, H) なので入れ替え
-        target = (int(size[1]), int(size[0]))
+    elif isinstance(size, (tuple, list)):
+        if len(size) == 2:
+            h, w = int(size[0]), int(size[1])
+        elif len(size) == 3:
+            h, w, c = int(size[0]), int(size[1]), int(size[2])
+            # Optional sanity check (do not enforce to keep drop-in behavior)
+            if img.ndim == 3 and img.shape[2] != c:
+                # You can uncomment the next line to warn:
+                # print(f"[imresize] channel mismatch: input {img.shape[2]} vs requested {c} (ignored)")
+                pass
+        else:
+            raise ValueError(f"Invalid size for imresize: {size}")
+        target = (w, h)  # PIL expects (W, H)
     else:
         raise ValueError(f"Invalid size for imresize: {size}")
 
-    # --- interpolation map ---
+    # Interp mapping
     _imap = {
         'nearest': Image.NEAREST,
         'bilinear': Image.BILINEAR,
@@ -55,10 +57,10 @@ def imresize(img, size, interp='bilinear', mode=None):
     }
     resample = _imap.get(interp, Image.BILINEAR)
 
-    # --- resize & back to numpy with original dtype/range ---
     out = pil_img.resize(target, resample=resample)
     arr = np.array(out)
 
+    # Back to original dtype/range
     if np.issubdtype(orig_dtype, np.floating):
         arr = (arr.astype(np.float32) / 255.0).astype(orig_dtype)
     else:
