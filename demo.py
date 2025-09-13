@@ -22,28 +22,44 @@ FLAGS = flags.FLAGS
 # ========== 互換 imresize ==========
 def imresize(img, size, interp='bilinear', mode=None):
     """
-    Compatible with legacy scipy.misc.imresize:
-      - size: float scale, (H, W), or (H, W, C). Cは無視（形状チェックのみ）
-      - interp: 'nearest' | 'bilinear' | 'bicubic' | 'lanczos'
-    戻り dtype/レンジは入力に合わせる（float→[0,1]、int→0..255）
+    Legacy-friendly imresize:
+      - size: float scale, (H, W), or (H, W, C)  ※Cは無視
+      - float入力のレンジを自動判定:
+          * max<=1.0 → 0..1 を返す
+          * それ以外 → 0..255 を返す
     """
+    import numpy as np
+    from PIL import Image
+
     orig_dtype = img.dtype
-    if np.issubdtype(orig_dtype, np.floating):
-        src = (np.clip(img, 0.0, 1.0) * 255.0).astype(np.uint8)
+    # ---- floatレンジを推定 ----
+    is_float = np.issubdtype(orig_dtype, np.floating)
+    if is_float:
+        maxv = float(np.nanmax(img)) if img.size else 0.0
+        float_is_01 = maxv <= 1.0 + 1e-6
+    else:
+        float_is_01 = False
+
+    # ---- PILへ（常にuint8で渡す）----
+    if is_float:
+        if float_is_01:
+            src = (np.clip(img, 0.0, 1.0) * 255.0).astype(np.uint8)
+        else:
+            src = np.clip(img, 0.0, 255.0).astype(np.uint8)
     else:
         src = np.clip(img, 0, 255).astype(np.uint8)
 
     pil_img = Image.fromarray(src)
 
+    # ---- 目標サイズ ----
     if isinstance(size, (int, float)):
-        new_w = int(round(pil_img.width * float(size)))
-        new_h = int(round(pil_img.height * float(size)))
-        target = (new_w, new_h)
+        target = (int(round(pil_img.width * float(size))),
+                  int(round(pil_img.height * float(size))))
     elif isinstance(size, (tuple, list)):
         if len(size) == 2:
             h, w = int(size[0]), int(size[1])
         elif len(size) == 3:
-            h, w = int(size[0]), int(size[1])
+            h, w = int(size[0]), int(size[1])  # Cは無視
         else:
             raise ValueError(f"Invalid size for imresize: {size}")
         target = (w, h)  # PILは(W,H)
@@ -56,13 +72,15 @@ def imresize(img, size, interp='bilinear', mode=None):
         'bicubic': Image.BICUBIC,
         'lanczos': Image.LANCZOS,
     }
-    resample = _imap.get(interp, Image.BILINEAR)
-
-    out = pil_img.resize(target, resample=resample)
+    out = pil_img.resize(target, resample=_imap.get(interp, Image.BILINEAR))
     arr = np.array(out)
 
-    if np.issubdtype(orig_dtype, np.floating):
-        arr = (arr.astype(np.float32) / 255.0).astype(orig_dtype)
+    # ---- 元dtype/レンジに戻す ----
+    if is_float:
+        if float_is_01:
+            arr = (arr.astype(np.float32) / 255.0).astype(orig_dtype)  # 0..1で返す
+        else:
+            arr = arr.astype(orig_dtype)  # 0..255で返す
     else:
         arr = arr.astype(orig_dtype)
     return arr
