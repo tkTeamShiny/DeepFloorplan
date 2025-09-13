@@ -71,6 +71,14 @@ os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '1'
+
+import tensorflow.compat.v1 as tf
+tf.disable_v2_behavior()
+
+from tensorflow.compat.v1 import app, flags, gfile
+FLAGS = flags.FLAGS
+
 # input image path
 parser = argparse.ArgumentParser()
 
