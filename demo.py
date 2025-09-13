@@ -3,8 +3,7 @@ import argparse
 import numpy as np
 import tensorflow as tf
 
-from imageio import imread
-from scipy.misc import imsave, imresize
+from imageio import imread, imsave, imresize
 from matplotlib import pyplot as plt
 
 os.environ['CUDA_VISIBLE_DEVICES'] = '0'
