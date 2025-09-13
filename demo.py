@@ -1,33 +1,40 @@
+# demo.py ーー 完全置換版（表示をファイル保存に変更）
 import os
 import argparse
 import numpy as np
-import tensorflow as tf
 
+# ===== Matplotlib: 非GUIバックエンドで保存 =====
+import matplotlib
+matplotlib.use('Agg')
 from matplotlib import pyplot as plt
 
-from imageio.v2 import imread, imwrite as imsave  # imread/imsave はこれでOK
+from imageio.v2 import imread, imwrite as imsave
 from PIL import Image
 
+# ===== TF1 互換 =====
+os.environ['CUDA_VISIBLE_DEVICES'] = '0'
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+import tensorflow.compat.v1 as tf
+tf.disable_v2_behavior()
+from tensorflow.compat.v1 import flags
+FLAGS = flags.FLAGS
+
+# ========== 互換 imresize ==========
 def imresize(img, size, interp='bilinear', mode=None):
     """
     Compatible with legacy scipy.misc.imresize:
-      - size: float scale, (H, W), or (H, W, C). If C is given, it's ignored (shape check only).
+      - size: float scale, (H, W), or (H, W, C). Cは無視（形状チェックのみ）
       - interp: 'nearest' | 'bilinear' | 'bicubic' | 'lanczos'
-    Returns in the same dtype/range as input.
+    戻り dtype/レンジは入力に合わせる（float→[0,1]、int→0..255）
     """
     orig_dtype = img.dtype
-
-    # Convert to uint8 for PIL
     if np.issubdtype(orig_dtype, np.floating):
-        src = np.clip(img, 0.0, 1.0) * 255.0
-        src = src.astype(np.uint8)
+        src = (np.clip(img, 0.0, 1.0) * 255.0).astype(np.uint8)
     else:
         src = np.clip(img, 0, 255).astype(np.uint8)
 
-    # Let Pillow infer mode (avoids deprecation of 'mode=' arg)
     pil_img = Image.fromarray(src)
 
-    # Resolve target size
     if isinstance(size, (int, float)):
         new_w = int(round(pil_img.width * float(size)))
         new_h = int(round(pil_img.height * float(size)))
@@ -36,19 +43,13 @@ def imresize(img, size, interp='bilinear', mode=None):
         if len(size) == 2:
             h, w = int(size[0]), int(size[1])
         elif len(size) == 3:
-            h, w, c = int(size[0]), int(size[1]), int(size[2])
-            # Optional sanity check (do not enforce to keep drop-in behavior)
-            if img.ndim == 3 and img.shape[2] != c:
-                # You can uncomment the next line to warn:
-                # print(f"[imresize] channel mismatch: input {img.shape[2]} vs requested {c} (ignored)")
-                pass
+            h, w = int(size[0]), int(size[1])
         else:
             raise ValueError(f"Invalid size for imresize: {size}")
-        target = (w, h)  # PIL expects (W, H)
+        target = (w, h)  # PILは(W,H)
     else:
         raise ValueError(f"Invalid size for imresize: {size}")
 
-    # Interp mapping
     _imap = {
         'nearest': Image.NEAREST,
         'bilinear': Image.BILINEAR,
@@ -60,97 +61,101 @@ def imresize(img, size, interp='bilinear', mode=None):
     out = pil_img.resize(target, resample=resample)
     arr = np.array(out)
 
-    # Back to original dtype/range
     if np.issubdtype(orig_dtype, np.floating):
         arr = (arr.astype(np.float32) / 255.0).astype(orig_dtype)
     else:
         arr = arr.astype(orig_dtype)
     return arr
-	
-os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
-
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '1'
-
-import tensorflow.compat.v1 as tf
-tf.disable_v2_behavior()
-
-from tensorflow.compat.v1 import app, flags, gfile
-FLAGS = flags.FLAGS
-
-# input image path
+# ========== 引数 ==========
 parser = argparse.ArgumentParser()
-
 parser.add_argument('--im_path', type=str, default='./demo/45765448.jpg',
-                    help='input image paths.')
+                    help='input image path.')
+parser.add_argument('--save_dir', type=str, default='outputs',
+                    help='where to save results.')
 
-# color map
+# ========== カラーマップ ==========
 floorplan_map = {
-	0: [255,255,255], # background
-	1: [192,192,224], # closet
-	2: [192,255,255], # batchroom/washroom
-	3: [224,255,192], # livingroom/kitchen/dining room
-	4: [255,224,128], # bedroom
-	5: [255,160, 96], # hall
-	6: [255,224,224], # balcony
-	7: [255,255,255], # not used
-	8: [255,255,255], # not used
-	9: [255, 60,128], # door & window
-	10:[  0,  0,  0]  # wall
+    0: [255,255,255], # background
+    1: [192,192,224], # closet
+    2: [192,255,255], # bathroom/washroom
+    3: [224,255,192], # livingroom/kitchen/dining room
+    4: [255,224,128], # bedroom
+    5: [255,160, 96], # hall
+    6: [255,224,224], # balcony
+    7: [255,255,255], # not used
+    8: [255,255,255], # not used
+    9: [255, 60,128], # door & window
+    10:[  0,  0,  0]  # wall
 }
 
 def ind2rgb(ind_im, color_map=floorplan_map):
-	rgb_im = np.zeros((ind_im.shape[0], ind_im.shape[1], 3))
-
-	for i, rgb in color_map.items():
-		rgb_im[(ind_im==i)] = rgb
-
-	return rgb_im
+    """ (H,W) のラベル → (H,W,3) uint8 """
+    h, w = ind_im.shape[:2]
+    rgb_im = np.zeros((h, w, 3), dtype=np.uint8)
+    for i, rgb in color_map.items():
+        rgb_im[(ind_im == i)] = rgb
+    return rgb_im
 
 def main(args):
-	# load input
-	im = imread(args.im_path, mode='RGB')
-	im = im.astype(np.float32)
-	im = imresize(im, (512,512,3)) / 255.
+    os.makedirs(args.save_dir, exist_ok=True)
 
-	# create tensorflow session
-	with tf.Session() as sess:
-		
-		# initialize
-		sess.run(tf.group(tf.global_variables_initializer(),
-					tf.local_variables_initializer()))
+    # 画像読込 & 前処理
+    im = imread(args.im_path)  # そのまま読む（RGB前提）
+    im = im.astype(np.float32)
+    im = imresize(im, (512, 512, 3)) / 255.0  # 0..1
 
-		# restore pretrained model
-		saver = tf.train.import_meta_graph('./pretrained/pretrained_r3d.meta')
-		saver.restore(sess, './pretrained/pretrained_r3d')
+    # 推論
+    with tf.Session() as sess:
+        sess.run(tf.group(tf.global_variables_initializer(),
+                          tf.local_variables_initializer()))
 
-		# get default graph
-		graph = tf.get_default_graph()
+        # 既存固定名のまま（必要なら ckpt ロバスト復元に差し替え可）
+        saver = tf.train.import_meta_graph('./pretrained/pretrained_r3d.meta')
+        saver.restore(sess, './pretrained/pretrained_r3d')
 
-		# restore inputs & outpus tensor
-		x = graph.get_tensor_by_name('inputs:0')
-		room_type_logit = graph.get_tensor_by_name('Cast:0')
-		room_boundary_logit = graph.get_tensor_by_name('Cast_1:0')
+        graph = tf.get_default_graph()
+        x = graph.get_tensor_by_name('inputs:0')
+        room_type_logit = graph.get_tensor_by_name('Cast:0')
+        room_boundary_logit = graph.get_tensor_by_name('Cast_1:0')
 
-		# infer results
-		[room_type, room_boundary] = sess.run([room_type_logit, room_boundary_logit],\
-										feed_dict={x:im.reshape(1,512,512,3)})
-		room_type, room_boundary = np.squeeze(room_type), np.squeeze(room_boundary)
+        room_type, room_boundary = sess.run(
+            [room_type_logit, room_boundary_logit],
+            feed_dict={x: im.reshape(1, 512, 512, 3)}
+        )
+        room_type = np.squeeze(room_type)
+        room_boundary = np.squeeze(room_boundary)
 
-		# merge results
-		floorplan = room_type.copy()
-		floorplan[room_boundary==1] = 9
-		floorplan[room_boundary==2] = 10
-		floorplan_rgb = ind2rgb(floorplan)
+    # マージ
+    floorplan = room_type.copy()
+    floorplan[room_boundary == 1] = 9
+    floorplan[room_boundary == 2] = 10
+    floorplan_rgb = ind2rgb(floorplan)            # uint8
+    im_uint8 = (np.clip(im, 0, 1) * 255).astype(np.uint8)
 
-		# plot results
-		plt.subplot(121)
-		plt.imshow(im)
-		plt.subplot(122)
-		plt.imshow(floorplan_rgb/255.)
-		plt.show()
+    # 保存（個別 & 横並び & Matplotlib 図）
+    out_img = os.path.join(args.save_dir, 'input_512.png')
+    out_seg = os.path.join(args.save_dir, 'floorplan_rgb.png')
+    out_side = os.path.join(args.save_dir, 'vis_side_by_side.png')
+    out_fig = os.path.join(args.save_dir, 'vis_matplotlib.png')
+
+    imsave(out_img, im_uint8)
+    imsave(out_seg, floorplan_rgb)
+    side = np.concatenate([im_uint8, floorplan_rgb], axis=1)
+    imsave(out_side, side)
+
+    plt.figure(figsize=(10, 5))
+    plt.subplot(1, 2, 1); plt.imshow(im_uint8);     plt.axis('off'); plt.title('Input')
+    plt.subplot(1, 2, 2); plt.imshow(floorplan_rgb); plt.axis('off'); plt.title('Floorplan')
+    plt.tight_layout()
+    plt.savefig(out_fig, dpi=150)
+    # plt.show()  # スクリプト実行では不要（保存で十分）
+
+    print(f"[Saved] {out_img}")
+    print(f"[Saved] {out_seg}")
+    print(f"[Saved] {out_side}")
+    print(f"[Saved] {out_fig}")
 
 if __name__ == '__main__':
-	FLAGS, unparsed = parser.parse_known_args()
-	main(FLAGS)
+    FLAGS, _ = parser.parse_known_args()
+    main(FLAGS)
