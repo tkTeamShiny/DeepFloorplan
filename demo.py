@@ -3,9 +3,68 @@ import argparse
 import numpy as np
 import tensorflow as tf
 
-from imageio import imread, imsave, imresize
 from matplotlib import pyplot as plt
 
+from imageio.v2 import imread, imwrite as imsave  # imread/imsave はこれでOK
+from PIL import Image
+
+def imresize(img, size, interp='bilinear', mode=None):
+    """
+    A lightweight imresize compatible with the old API:
+      - size: float(倍率) or (H, W)
+      - interp: 'nearest' | 'bilinear' | 'bicubic' | 'lanczos'
+    dtype/範囲は元配列に合わせて返します（float→[0,1]、整数→整数）。
+    """
+    # --- to PIL image (uint8, proper mode) ---
+    orig_dtype = img.dtype
+    if img.ndim == 2:
+        pil_mode = 'L'
+    elif img.ndim == 3 and img.shape[2] == 3:
+        pil_mode = 'RGB'
+    elif img.ndim == 3 and img.shape[2] == 4:
+        pil_mode = 'RGBA'
+    else:
+        # それ以外の形状は未対応（必要なら拡張してください）
+        raise ValueError(f"Unsupported image shape for imresize: {img.shape}")
+
+    if np.issubdtype(orig_dtype, np.floating):
+        src = np.clip(img, 0.0, 1.0) * 255.0
+        src = src.astype(np.uint8)
+    else:
+        src = np.clip(img, 0, 255).astype(np.uint8)
+
+    pil_img = Image.fromarray(src, mode=pil_mode)
+
+    # --- resolve target size ---
+    if isinstance(size, (int, float)):
+        new_w = int(round(pil_img.width * float(size)))
+        new_h = int(round(pil_img.height * float(size)))
+        target = (new_w, new_h)
+    elif isinstance(size, (tuple, list)) and len(size) == 2:
+        # old imresize は (H, W)。Pillow は (W, H) なので入れ替え
+        target = (int(size[1]), int(size[0]))
+    else:
+        raise ValueError(f"Invalid size for imresize: {size}")
+
+    # --- interpolation map ---
+    _imap = {
+        'nearest': Image.NEAREST,
+        'bilinear': Image.BILINEAR,
+        'bicubic': Image.BICUBIC,
+        'lanczos': Image.LANCZOS,
+    }
+    resample = _imap.get(interp, Image.BILINEAR)
+
+    # --- resize & back to numpy with original dtype/range ---
+    out = pil_img.resize(target, resample=resample)
+    arr = np.array(out)
+
+    if np.issubdtype(orig_dtype, np.floating):
+        arr = (arr.astype(np.float32) / 255.0).astype(orig_dtype)
+    else:
+        arr = arr.astype(orig_dtype)
+    return arr
+	
 os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
