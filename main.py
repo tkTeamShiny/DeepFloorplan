@@ -7,8 +7,8 @@ import time
 import random
 import numpy as np
 import tensorflow as _tf
-tf = _tf.compat.v1
-tf.disable_v2_behavior()
+_tf.compat.v1.disable_v2_behavior()   # ← 先に無効化
+tf = _tf.compat.v1                    # ← その後、"tf" を v1 に差し替え
 
 from net import *  # Network, data_loader_bd_rm_from_tfrecord, GPU_ID などを想定
 from scores import fast_hist
