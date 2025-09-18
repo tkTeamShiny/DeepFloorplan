@@ -122,18 +122,18 @@ class MODEL(Network):
         # 各クラスのマスク & ピクセル数
         m_c = []
         n_c = []
-        for c in xrange(num_classes):
+        for c in range(num_classes):
             m_c.append(tf.cast(tf.equal(ind, c), dtype=tf.int32))
             n_c.append(tf.cast(tf.reduce_sum(m_c[-1]), dtype=tf.float32))
 
         # 重み計算
         c = []
-        for i in xrange(num_classes):
+        for i in range(num_classes):
             c.append(total - n_c[i])
         tc = tf.add_n(c)
 
         loss = 0.0
-        for i in xrange(num_classes):
+        for i in range(num_classes):
             w = c[i] / tc
             m_c_one_hot = tf.one_hot((i * m_c[i]), num_classes, axis=-1)
             y_c = m_c_one_hot * y
@@ -186,8 +186,8 @@ class MODEL(Network):
 
             print("Start Training!")
             total_times = 0.0
-            for ep in xrange(max_ep):  # epoch
-                for n in xrange(num_batch):  # batch
+            for ep in range(max_ep):  # epoch
+                for n in range(num_batch):  # batch
                     tic = time.time()
                     _loss, _ = sess.run([loss, optim])
                     duration = time.time() - tic
@@ -286,7 +286,7 @@ class MODEL(Network):
         n = len(paths)
         hist = np.zeros((num_of_classes, num_of_classes))
 
-        for i in xrange(n):
+        for i in range(n):
             # 入力画像
             im = imread(image_paths[i], mode="RGB")
             im = imresize(im, (512, 512, 3)) / 255.0
@@ -355,7 +355,7 @@ class MODEL(Network):
                 ),
                 file=f,
             )
-            for i in xrange(mean_acc.shape[0]):
+            for i in range(mean_acc.shape[0]):
                 if i not in [7, 8]:  # ignore class 7 & 8
                     print(
                         "\t\tepoch {}: {}th label: accuracy = {:.4f}".format(
