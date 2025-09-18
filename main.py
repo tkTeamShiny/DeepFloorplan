@@ -170,7 +170,7 @@ class MODEL(Network):
         w1, w2 = self.cross_two_tasks_weight(labels_r_hot, labels_cw_hot)
         loss = (w1 * loss1 + w2 * loss2)
 
-        optim = tf.train.AdamOptimizer(learning_rate=1e-4).minimize(
+        optim = tf.compat.v1.train.AdamOptimizer(learning_rate=1e-4).minimize(
             loss, colocate_gradients_with_ops=True
         )
 
