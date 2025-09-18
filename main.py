@@ -7,6 +7,8 @@ import time
 import random
 import numpy as np
 import tensorflow as tf
+tf = _tf.compat.v1
+tf.disable_v2_behavior()
 
 from net import *  # Network, data_loader_bd_rm_from_tfrecord, GPU_ID などを想定
 from scores import fast_hist
