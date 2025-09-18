@@ -1,4 +1,4 @@
-# demo.py ーー 完全置換版（表示をファイル保存に変更）
+# demo.py ーー 完全置換版（1/3/4chを自動吸収・保存出力）
 import os
 import argparse
 import numpy as np
@@ -119,16 +119,23 @@ def main(args):
     os.makedirs(args.save_dir, exist_ok=True)
 
     # 画像読込 & 前処理
-    im = imread(args.im_path)  # そのまま読む（RGB前提）
-    im = im.astype(np.float32)
-    im = imresize(im, (512, 512, 3)) / 255.0  # 0..1
+    im = imread(args.im_path)  # imageio: カラーは(H,W,3)、グレーは(H,W)
+    # ---- ★ここが追加：1ch/4chを3chに統一 ----
+    if im.ndim == 2:
+        # グレースケール → 3chへ複製
+        im = np.stack([im, im, im], axis=-1)
+    elif im.ndim == 3 and im.shape[2] == 4:
+        # RGBA → 先頭3チャンネルのみ
+        im = im[:, :, :3]
 
-    # 推論
+    im = im.astype(np.float32)
+    im = imresize(im, (512, 512, 3)) / 255.0  # 0..1に正規化
+
+    # 推論（TF1グラフをそのまま使用）
     with tf.Session() as sess:
         sess.run(tf.group(tf.global_variables_initializer(),
                           tf.local_variables_initializer()))
 
-        # 既存固定名のまま（必要なら ckpt ロバスト復元に差し替え可）
         saver = tf.train.import_meta_graph('./pretrained/pretrained_r3d.meta')
         saver.restore(sess, './pretrained/pretrained_r3d')
 
@@ -144,7 +151,7 @@ def main(args):
         room_type = np.squeeze(room_type)
         room_boundary = np.squeeze(room_boundary)
 
-    # マージ
+    # マージ（部屋タイプ + エッジ上書き）
     floorplan = room_type.copy()
     floorplan[room_boundary == 1] = 9
     floorplan[room_boundary == 2] = 10
@@ -167,7 +174,6 @@ def main(args):
     plt.subplot(1, 2, 2); plt.imshow(floorplan_rgb); plt.axis('off'); plt.title('Floorplan')
     plt.tight_layout()
     plt.savefig(out_fig, dpi=150)
-    # plt.show()  # スクリプト実行では不要（保存で十分）
 
     print(f"[Saved] {out_img}")
     print(f"[Saved] {out_seg}")
