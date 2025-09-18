@@ -113,7 +113,7 @@ class MODEL(Network):
         eps = 1e-6
         z = tf.nn.softmax(x)
         cliped_z = tf.clip_by_value(z, eps, 1 - eps)
-        log_z = tf.log(cliped_z)
+        log_z = tf.math.log(cliped_z)
         num_classes = y.shape.as_list()[-1]
 
         ind = tf.argmax(y, -1, output_type=tf.int32)
