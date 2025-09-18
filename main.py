@@ -6,7 +6,7 @@ import os
 import time
 import random
 import numpy as np
-import tensorflow as tf
+import tensorflow as _tf
 tf = _tf.compat.v1
 tf.disable_v2_behavior()
 
