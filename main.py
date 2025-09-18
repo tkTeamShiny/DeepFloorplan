@@ -18,7 +18,7 @@ import tensorflow as tf
 
 # 画像入出力（元コードの imread/imsave 相当）
 from imageio.v2 import imread, imwrite as imsave
-
+from utils.tf_record import imresize
 # リポジトリ内ユーティリティ一式
 # - Network, data_loader_bd_rm_from_tfrecord, imresize, ind2rgb, rgb2ind,
 #   floorplan_boundary_map, floorplan_fuse_map, fast_hist などを想定
