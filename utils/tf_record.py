@@ -15,8 +15,14 @@ import tensorflow as tf
 from imageio.v2 import imread as _imread, imwrite as _imsave
 from PIL import Image
 
-# このファイルは utils/ 配下。呼び出し側(net.py)で sys.path に ./utils を追加済み
-from rgb_ind_convertor import *  # ind2rgb, rgb2ind, color maps 等
+# ← ここを robust に修正（相対 import を試して、失敗したら自分のディレクトリを sys.path に追加）
+try:
+    # パッケージ（utils）がちゃんとパッケージ扱いのとき
+    from .rgb_ind_convertor import *      # ind2rgb, rgb2ind, color maps 等
+except Exception:
+    # 直接実行/相対で入らない場合でも同梱モジュールを確実に見つける
+    sys.path.append(os.path.dirname(__file__))
+    from rgb_ind_convertor import *
 
 # ---- TF1 API を使う前提（main.py側で disable_eager_execution 済み） ----
 # ここでは明示的に compat.v1 を使う
