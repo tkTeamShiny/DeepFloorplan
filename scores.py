@@ -1,122 +1,110 @@
-import argparse
+# -*- coding: utf-8 -*-
+from __future__ import absolute_import, division, print_function
+
 import numpy as np
-from scipy.misc import imread, imsave, imresize
 
-import os
-import sys
-import glob
-import time
+"""
+Utility functions for segmentation scoring.
+- Confusion matrix (fast_hist)
+- Per-class IoU / accuracy helpers
+Python 3 compatible (print(), range()).
+"""
 
-sys.path.append('./utils/')
-from metrics import fast_hist
-from rgb_ind_convertor import *
 
-parser = argparse.ArgumentParser()
+def fast_hist(a, b, n):
+    """
+    Build a confusion matrix (n x n) fast.
+    a: predicted labels, shape (H*W,) or flat array
+    b: ground-truth labels, same shape as a
+    n: number of classes
+    """
+    a = np.asarray(a).astype(np.int64)
+    b = np.asarray(b).astype(np.int64)
 
-parser.add_argument('--dataset', type=str, default='R3D',
-					help='define the benchmark')
+    mask = (a >= 0) & (a < n)
+    if b.shape != a.shape:
+        raise ValueError("Shape mismatch in fast_hist: {} vs {}".format(a.shape, b.shape))
+    hist = np.bincount(
+        n * a[mask] + b[mask],
+        minlength=n ** 2
+    ).reshape(n, n)
+    return hist
 
-parser.add_argument('--result_dir', type=str, default='./out',
-					help='define the storage folder of network prediction')
 
-def evaluate_semantic(benchmark_path, result_dir, num_of_classes=11, need_merge_result=False, im_downsample=False, gt_downsample=False):
-	gt_paths = open(benchmark_path, 'r').read().splitlines()
-	d_paths = [p.split('\t')[2] for p in gt_paths] # 1 denote wall, 2 denote door, 3 denote room
-	r_paths = [p.split('\t')[3] for p in gt_paths] # 1 denote wall, 2 denote door, 3 denote room
-	cw_paths = [p.split('\t')[-1] for p in gt_paths] # 1 denote wall, 2 denote door, 3 denote room, last one denote close wall
-	im_paths = [os.path.join(result_dir, p.split('/')[-1]) for p in r_paths]
-	if need_merge_result:
-		im_paths = [os.path.join(result_dir+'/room', p.split('/')[-1]) for p in r_paths]
-		im_d_paths = [os.path.join(result_dir+'/door', p.split('/')[-1]) for p in d_paths]
-		im_cw_paths = [os.path.join(result_dir+'/close_wall', p.split('/')[-1]) for p in cw_paths]
+def per_class_iou(hist):
+    """
+    IoU for each class from confusion matrix.
+    IoU_c = TP / (TP + FP + FN)
+    """
+    hist = np.asarray(hist, dtype=np.float64)
+    tp = np.diag(hist)
+    fp = hist.sum(axis=0) - tp
+    fn = hist.sum(axis=1) - tp
+    denom = tp + fp + fn
+    with np.errstate(divide='ignore', invalid='ignore'):
+        iou = tp / np.maximum(denom, 1e-6)
+    return iou  # shape: (num_classes,)
 
-	n = len(im_paths)
-	# n = 1
-	hist = np.zeros((num_of_classes, num_of_classes))
-	for i in xrange(n):
-		im = imread(im_paths[i], mode='RGB')
-		if need_merge_result:
-			im_d = imread(im_d_paths[i], mode='L')
-			im_cw = imread(im_cw_paths[i], mode='L')
-		# create fuse semantic label
-		cw = imread(cw_paths[i], mode='L')
-		dd = imread(d_paths[i], mode='L')
-		rr = imread(r_paths[i], mode='RGB')
 
-		if im_downsample:
-			im = imresize(im, (512, 512, 3))
-			if need_merge_result:
-				im_d = imresize(im_d, (512, 512))
-				im_cw = imresize(im_cw, (512, 512))
-				im_d = im_d / 255
-				im_cw = im_cw / 255
+def per_class_acc(hist):
+    """
+    Per-class accuracy from confusion matrix.
+    Acc_c = TP / (TP + FN)
+    """
+    hist = np.asarray(hist, dtype=np.float64)
+    tp = np.diag(hist)
+    support = hist.sum(axis=1)
+    with np.errstate(divide='ignore', invalid='ignore'):
+        acc = tp / np.maximum(support, 1e-6)
+    return acc  # shape: (num_classes,)
 
-		if gt_downsample:
-			cw = imresize(cw, (512, 512))
-			dd = imresize(dd, (512, 512))
-			rr = imresize(rr, (512, 512, 3))
 
-		# normalize
-		cw = cw / 255
-		dd = dd / 255
+def overall_acc(hist):
+    """Overall pixel accuracy."""
+    hist = np.asarray(hist, dtype=np.float64)
+    return np.diag(hist).sum() / np.maximum(hist.sum(), 1e-6)
 
-		im_ind = rgb2ind(im, color_map=floorplan_fuse_map) 
-		if im_ind.sum()==0:
-			im_ind = rgb2ind(im+1)
-		rr_ind = rgb2ind(rr, color_map=floorplan_fuse_map) 
-		if rr_ind.sum()==0:
-			rr_ind = rgb2ind(rr+1)
 
-		if need_merge_result:
-			im_d  = (im_d>0.5).astype(np.uint8)
-			im_cw = (im_cw>0.5).astype(np.uint8)
-			im_ind[im_cw==1] = 10
-			im_ind[im_d ==1] = 9
+def print_summary(hist, class_names=None, ignore_indices=None, title=None):
+    """
+    Pretty-print metrics. Safe for Python3.
+    - ignore_indices: list of class indices to ignore when averaging
+    """
+    if title:
+        print("==== {} ====".format(title))
 
-		# merge the label and produce 
-		cw = (cw>0.5).astype(np.uint8)
-		dd = (dd>0.5).astype(np.uint8)
-		rr_ind[cw==1] = 10
-		rr_ind[dd==1] = 9
+    iou = per_class_iou(hist)
+    acc = per_class_acc(hist)
+    oa = overall_acc(hist)
 
-		name = im_paths[i].split('/')[-1]
-		r_name = r_paths[i].split('/')[-1]
-		
-		print 'Evaluating {}(im) <=> {}(gt)...'.format(name, r_name)
+    n = len(iou)
+    idxs = list(range(n))
+    if ignore_indices:
+        idxs = [i for i in idxs if i not in set(ignore_indices)]
 
-		hist += fast_hist(im_ind.flatten(), rr_ind.flatten(), num_of_classes)
+    mean_iou = np.nanmean(iou[idxs]) if len(idxs) > 0 else np.nan
+    mean_acc = np.nanmean(acc[idxs]) if len(idxs) > 0 else np.nan
 
-	print '*'*60
-	# overall accuracy
-	acc = np.diag(hist).sum() / hist.sum()
-	print 'overall accuracy {:.4}'.format(acc)
-	# per-class accuracy, avoid div zero
-	acc = np.diag(hist) / (hist.sum(1) + 1e-6)
-	print 'room-type: mean accuracy {:.4}, room-type+bd: mean accuracy {:.4}'.format(np.nanmean(acc[:7]), (np.nansum(acc[:7])+np.nansum(acc[-2:]))/9.)
-	for t in xrange(0, acc.shape[0]):
-		if t not in [7, 8]:
-			print 'room type {}th, accuracy = {:.4}'.format(t, acc[t])
+    print("Overall Acc : {:.4f}".format(oa))
+    print("Mean IoU    : {:.4f}".format(mean_iou))
+    print("Mean Acc    : {:.4f}".format(mean_acc))
+    print("Per-class:")
+    for i in range(n):
+        name = str(i) if class_names is None or i >= len(class_names) else class_names[i]
+        print("  {:>2} {:<12s} | IoU {:.4f}  Acc {:.4f}".format(i, name, iou[i], acc[i]))
+    return {
+        "overall_acc": float(oa),
+        "mean_iou": float(mean_iou) if np.isfinite(mean_iou) else float("nan"),
+        "mean_acc": float(mean_acc) if np.isfinite(mean_acc) else float("nan"),
+        "per_class_iou": iou.tolist(),
+        "per_class_acc": acc.tolist(),
+    }
 
-	print '*'*60
-	# per-class IU, avoid div zero
-	iu = np.diag(hist) / (hist.sum(1) + 1e-6 + hist.sum(0) - np.diag(hist))
-	print 'room-type: mean IoU {:.4}, room-type+bd: mean IoU {:.4}'.format(np.nanmean(iu[:7]), (np.nansum(iu[:7])+np.nansum(iu[-2:]))/9.)
-	for t in xrange(iu.shape[0]):
-		if t not in [7,8]: # ignore class 7 & 8
-			print 'room type {}th, IoU = {:.4}'.format(t, iu[t])
 
-if __name__ == '__main__':
-	FLAGS, unparsed = parser.parse_known_args()
-
-	if FLAGS.dataset.lower() == 'r2v':
-		benchmark_path = './dataset/r2v_test.txt'
-	else:
-		benchmark_path = './dataset/r3d_test.txt'
-
-	result_dir = FLAGS.result_dir
-
-	tic = time.time()
-	evaluate_semantic(benchmark_path, result_dir, need_merge_result=False, im_downsample=False, gt_downsample=True) # same as previous line but 11 classes by combining the opening and wall line
-
-	print "*"*60
-	print "Evaluate time: {} sec".format(time.time()-tic)
+# 旧実装互換のダミーラッパー（もし他所から呼ばれても落ちないように）
+def evaluate_summary(name, r_name, hist, class_names=None, ignore_indices=None):
+    """
+    Kept for backward compatibility with older print-style calls in some forks.
+    """
+    print("Evaluating {}(im) <=> {}(gt)...".format(name, r_name))
+    return print_summary(hist, class_names=class_names, ignore_indices=ignore_indices, title=name)
