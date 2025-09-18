@@ -175,7 +175,7 @@ class MODEL(Network):
         )
 
         # セッション
-        config = tf.ConfigProto(allow_soft_placement=True)
+        config = tf.compat.v1.ConfigProto(allow_soft_placement=True)
         config.gpu_options.allow_growth = True
         with tf.Session(config=config) as sess:
             sess.run(tf.group(tf.global_variables_initializer(), tf.local_variables_initializer()))
