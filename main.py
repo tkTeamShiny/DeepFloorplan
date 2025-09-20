@@ -254,20 +254,36 @@ class MODEL(Network):
             out1, out2 = sess.run([rooms, close_walls], feed_dict={x: im_x})
 
             if resize:
-                out1_rgb = ind2rgb(np.squeeze(out1))
-                out1_rgb = imresize(out1_rgb, (im.shape[0], im.shape[1]))
-                out2_rgb = ind2rgb(np.squeeze(out2), color_map=floorplan_boundary_map)
-                out2_rgb = imresize(out2_rgb, (im.shape[0], im.shape[1]))
+                # 先に「整数ラベル」を最近傍で元サイズへ→その後に色付け
+                room_label = np.squeeze(out1).astype(np.uint8)
+                bd_label   = np.squeeze(out2).astype(np.uint8)
+                import cv2
+                room_label = cv2.resize(
+                    room_label, (im.shape[1], im.shape[0]),
+                    interpolation=cv2.INTER_NEAREST
+                )
+                bd_label = cv2.resize(
+                    bd_label, (im.shape[1], im.shape[0]),
+                    interpolation=cv2.INTER_NEAREST
+                )
+                out1_rgb = ind2rgb(room_label)
+                out2_rgb = ind2rgb(bd_label, color_map=floorplan_boundary_map)
             else:
-                out1_rgb = ind2rgb(np.squeeze(out1))
-                out2_rgb = ind2rgb(np.squeeze(out2), color_map=floorplan_boundary_map)
+                out1_rgb = ind2rgb(np.squeeze(out1).astype(np.uint8))
+                out2_rgb = ind2rgb(np.squeeze(out2).astype(np.uint8), color_map=floorplan_boundary_map)
 
             if merge:
-                out1i = np.squeeze(out1)
-                out2i = np.squeeze(out2)
+                # マージも「ラベル」で行ってから色付け
+                out1i = np.squeeze(out1).astype(np.uint8)
+                out2i = np.squeeze(out2).astype(np.uint8)
+                if resize:
+                    import cv2
+                    out1i = cv2.resize(out1i, (im.shape[1], im.shape[0]), interpolation=cv2.INTER_NEAREST)
+                    out2i = cv2.resize(out2i, (im.shape[1], im.shape[0]), interpolation=cv2.INTER_NEAREST)
                 out1i[out2i == 2] = 10
                 out1i[out2i == 1] = 9
                 out3_rgb = ind2rgb(out1i, color_map=floorplan_fuse_map)
+
             # 保存
             name = p.split("/")[-1]
             save_path1 = os.path.join(room_dir, name.split(".jpg")[0] + "_rooms.png")
