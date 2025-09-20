@@ -224,15 +224,15 @@ class MODEL(Network):
         if not os.path.exists(close_wall_dir):
             os.mkdir(close_wall_dir)
 
-        x = tf.placeholder(shape=[1, 512, 512, 3], dtype=tf.float32)
+        x = tf.compat.v1.placeholder(shape=[1, 512, 512, 3], dtype=tf.float32)
         logits1, logits2 = self.forward(x, init_with_pretrain_vgg=False)
         rooms = self.convert_one_hot_to_image(logits1, act="softmax", dtype="int")
         close_walls = self.convert_one_hot_to_image(logits2, act="softmax", dtype="int")
 
-        config = tf.ConfigProto(allow_soft_placement=True)
-        sess = tf.Session(config=config)
-        sess.run(tf.group(tf.global_variables_initializer(), tf.local_variables_initializer()))
-        saver = tf.train.Saver()
+        config = tf.compat.v1.ConfigProto(allow_soft_placement=True)
+        sess = tf.compat.v1.Session(config=config)
+        sess.run(tf.group(tf.compat.v1.global_variables_initializer(), tf.compat.v1.local_variables_initializer()))
+        saver = tf.compat.v1.train.Saver()
         saver.restore(sess, save_path=tf.train.latest_checkpoint(self.log_dir))
 
         # 一枚ずつ推論
