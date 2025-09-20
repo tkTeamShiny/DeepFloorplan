@@ -240,7 +240,9 @@ class MODEL(Network):
         paths = [p.split("\t")[0] for p in paths]
         for p in paths:
             im = imread(p, mode="RGB")
-            im_x = imresize(im, (512, 512, 3)) / 255.0  # resize + normalize
+            # 入力は連続値画像なので LINEAR で縮小（NEAREST だと特徴が潰れて予測が背景0に寄りやすい）
+            import cv2
+            im_x = cv2.resize(im, (512, 512), interpolation=cv2.INTER_LINEAR) / 255.0
 
             # ====== reshape前の最小安全化（1ch→3ch対応）======
             im_x = np.asarray(im_x)
