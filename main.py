@@ -140,7 +140,7 @@ class MODEL(Network):
             loss += w * tf.reduce_mean(-tf.reduce_sum(y_c * log_z, axis=1))
         return loss / num_classes  # mean
 
-    def train(self, loader_dict, num_batch, max_step=40000):
+    def train(self, loader_dict, num_batch, max_step=1000): #max_step=40000
         images = loader_dict["images"]
         labels_r_hot = loader_dict["label_rooms"]
         labels_cw_hot = loader_dict["label_boundaries"]
