@@ -178,7 +178,7 @@ class MODEL(Network):
         config = tf.compat.v1.ConfigProto(allow_soft_placement=True)
         config.gpu_options.allow_growth = True
         with tf.compat.v1.Session(config=config) as sess:
-            sess.run(tf.group(tf.global_variables_initializer(), tf.local_variables_initializer()))
+            sess.run(tf.group(tf.compat.v1.global_variables_initializer(), tf.compat.v1.local_variables_initializer()))
             saver = tf.train.Saver(max_to_keep=10)
 
             coord = tf.train.Coordinator()
