@@ -226,8 +226,7 @@ class MODEL(Network):
 
         x = tf.compat.v1.placeholder(shape=[1, 512, 512, 3], dtype=tf.float32)
         logits1, logits2 = self.forward(x, init_with_pretrain_vgg=False)
-        rooms = self.convert_one_hot_to_image(logits1, act="softmax", dtype="int")
-        close_walls = self.convert_one_hot_to_image(logits2, act="softmax", dtype="int")
+        # rooms / boundary は raw logits を取り出して NumPy 側で argmax する
 
         config = tf.compat.v1.ConfigProto(allow_soft_placement=True)
         sess = tf.compat.v1.Session(config=config)
@@ -253,12 +252,15 @@ class MODEL(Network):
             im_x = im_x.reshape(1, 512, 512, 3)
             # ===============================================
 
-            out1, out2 = sess.run([rooms, close_walls], feed_dict={x: im_x})
+            logit_rm, logit_bd = sess.run([logits1, logits2], feed_dict={x: im_x})
+            # (1,H,W,C) → (H,W)
+            out1 = np.argmax(logit_rm[0], axis=-1).astype(np.uint8)
+            out2 = np.argmax(logit_bd[0], axis=-1).astype(np.uint8)
 
             if resize:
                 # 先に「整数ラベル」を最近傍で元サイズへ→その後に色付け
-                room_label = np.squeeze(out1).astype(np.uint8)
-                bd_label   = np.squeeze(out2).astype(np.uint8)
+                room_label = out1
+                bd_label   = out2
                 import cv2
                 room_label = cv2.resize(
                     room_label, (im.shape[1], im.shape[0]),
@@ -271,13 +273,13 @@ class MODEL(Network):
                 out1_rgb = ind2rgb(room_label)
                 out2_rgb = ind2rgb(bd_label, color_map=floorplan_boundary_map)
             else:
-                out1_rgb = ind2rgb(np.squeeze(out1).astype(np.uint8))
-                out2_rgb = ind2rgb(np.squeeze(out2).astype(np.uint8), color_map=floorplan_boundary_map)
+                out1_rgb = ind2rgb(out1)
+                out2_rgb = ind2rgb(out2, color_map=floorplan_boundary_map)
 
             if merge:
                 # マージも「ラベル」で行ってから色付け
-                out1i = np.squeeze(out1).astype(np.uint8)
-                out2i = np.squeeze(out2).astype(np.uint8)
+                out1i = out1.copy()
+                out2i = out2.copy()
                 if resize:
                     import cv2
                     out1i = cv2.resize(out1i, (im.shape[1], im.shape[0]), interpolation=cv2.INTER_NEAREST)
