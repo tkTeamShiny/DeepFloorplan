@@ -179,10 +179,10 @@ class MODEL(Network):
         config.gpu_options.allow_growth = True
         with tf.compat.v1.Session(config=config) as sess:
             sess.run(tf.group(tf.compat.v1.global_variables_initializer(), tf.compat.v1.local_variables_initializer()))
-            saver = tf.train.Saver(max_to_keep=10)
+            saver = tf.compat.v1.train.Saver(max_to_keep=10)
 
-            coord = tf.train.Coordinator()
-            threads = tf.train.start_queue_runners(sess=sess, coord=coord)
+            coord = tf.compat.v1.train.Coordinator()
+            threads = tf.compat.v1.train.start_queue_runners(sess=sess, coord=coord)
 
             print("Start Training!")
             total_times = 0.0
