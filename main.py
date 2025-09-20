@@ -256,6 +256,11 @@ class MODEL(Network):
             # (1,H,W,C) → (H,W)
             out1 = np.argmax(logit_rm[0], axis=-1).astype(np.uint8)
             out2 = np.argmax(logit_bd[0], axis=-1).astype(np.uint8)
+            # --- quick check (一度だけで可) ---
+            uniq1 = np.unique(out1)
+            uniq2 = np.unique(out2)
+            print("rooms unique[:10] =", uniq1[:10], " min/max=", out1.min(), out1.max())
+            print("boundary unique[:10] =", uniq2[:10], " min/max=", out2.min(), out2.max())
 
             if resize:
                 # 先に「整数ラベル」を最近傍で元サイズへ→その後に色付け
