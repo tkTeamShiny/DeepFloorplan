@@ -241,7 +241,15 @@ class MODEL(Network):
         for p in paths:
             im = imread(p, mode="RGB")
             im_x = imresize(im, (512, 512, 3)) / 255.0  # resize + normalize
-            im_x = np.reshape(im_x, (1, 512, 512, 3))
+
+            # ====== reshape前の最小安全化（1ch→3ch対応）======
+            im_x = np.asarray(im_x)
+            if im_x.ndim == 2:            # (H, W) → (H, W, 1)
+                im_x = im_x[..., None]
+            if im_x.shape[-1] == 1:       # 1ch → 3ch 複製
+                im_x = np.repeat(im_x, 3, axis=-1)
+            im_x = im_x.reshape(1, 512, 512, 3)
+            # ===============================================
 
             out1, out2 = sess.run([rooms, close_walls], feed_dict={x: im_x})
 
@@ -290,7 +298,15 @@ class MODEL(Network):
             # 入力画像
             im = imread(image_paths[i], mode="RGB")
             im = imresize(im, (512, 512, 3)) / 255.0
-            im = np.reshape(im, (1, 512, 512, 3))
+
+            # ====== reshape前の最小安全化（1ch→3ch対応）======
+            im = np.asarray(im)
+            if im.ndim == 2:            # (H, W) → (H, W, 1)
+                im = im[..., None]
+            if im.shape[-1] == 1:       # 1ch → 3ch 複製
+                im = np.repeat(im, 3, axis=-1)
+            im = im.reshape(1, 512, 512, 3)
+            # ===============================================
 
             # ---- GT の読み込み・整形 ----
             # 部屋（RGB → インデックス）
