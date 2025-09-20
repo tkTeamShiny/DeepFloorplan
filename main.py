@@ -252,15 +252,18 @@ class MODEL(Network):
             im_x = im_x.reshape(1, 512, 512, 3)
             # ===============================================
 
-            logit_rm, logit_bd = sess.run([logits1, logits2], feed_dict={x: im_x})
+            # forward() の戻り順が [boundary, room] のため入れ替える
+            logit_rm, logit_bd = sess.run([logits2, logits1], feed_dict={x: im_x})
             # (1,H,W,C) → (H,W)
             out1 = np.argmax(logit_rm[0], axis=-1).astype(np.uint8)
             out2 = np.argmax(logit_bd[0], axis=-1).astype(np.uint8)
             # --- quick check (一度だけで可) ---
             uniq1 = np.unique(out1)
             uniq2 = np.unique(out2)
-            print("rooms unique[:10] =", uniq1[:10], " min/max=", out1.min(), out1.max())
-            print("boundary unique[:10] =", uniq2[:10], " min/max=", out2.min(), out2.max())
+            print("rooms unique[:10] =", uniq1[:10], " min/max=", out1.min(), out1.max(),
+                  "| (rm from logits2)")
+            print("boundary unique[:10] =", uniq2[:10], " min/max=", out2.min(), out2.max(),
+                  "| (bd from logits1)")
 
             if resize:
                 # 先に「整数ラベル」を最近傍で元サイズへ→その後に色付け
