@@ -272,7 +272,7 @@ class MODEL(Network):
             print("Saving prediction: {}".format(name))
 
     def evaluate(self, sess, epoch, num_of_classes=11):
-        x = tf.placeholder(shape=[1, 512, 512, 3], dtype=tf.float32)
+        x = tf.compat.v1.placeholder(shape=[1, 512, 512, 3], dtype=tf.float32)
         logits1, logits2 = self.forward(x, init_with_pretrain_vgg=False)
         predict_bd = self.convert_one_hot_to_image(logits2, act="softmax", dtype="int")
         predict_room = self.convert_one_hot_to_image(logits1, act="softmax", dtype="int")
