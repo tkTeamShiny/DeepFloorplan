@@ -419,12 +419,14 @@ class MODEL(Network):
         for i in range(n):
             # 入力画像
             im = imread(image_paths[i], mode="RGB")
-            im = imresize(im, (512, 512, 3)) / 255.0
+            # 入力は連続値なので LINEAR でリサイズ
+            import cv2
+            im = cv2.resize(im, (512, 512), interpolation=cv2.INTER_LINEAR) / 255.0
 
             # ====== reshape前の最小安全化（1ch→3ch対応）======
             im = np.asarray(im)
             if im.ndim == 2:  # (H, W) → (H, W, 1)
-                im = im[..., 0:1]
+                im = im[..., None]
             if im.shape[-1] == 1:  # 1ch → 3ch 複製
                 im = np.repeat(im, 3, axis=-1)
             im = im.reshape(1, 512, 512, 3)
