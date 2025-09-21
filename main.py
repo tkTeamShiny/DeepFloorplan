@@ -231,8 +231,48 @@ class MODEL(Network):
         config = tf.compat.v1.ConfigProto(allow_soft_placement=True)
         sess = tf.compat.v1.Session(config=config)
         sess.run(tf.group(tf.compat.v1.global_variables_initializer(), tf.compat.v1.local_variables_initializer()))
+        # ----- 既定の復元 -----
+        ckpt_path = tf.train.latest_checkpoint(self.log_dir)
         saver = tf.compat.v1.train.Saver()
-        saver.restore(sess, save_path=tf.train.latest_checkpoint(self.log_dir))
+        saver.restore(sess, save_path=ckpt_path)
+
+        # ----- 復元できていない変数を確認（特に room ヘッド） -----
+        reader = tf.compat.v1.train.NewCheckpointReader(ckpt_path)
+        ckpt_vars = set(reader.get_variable_to_shape_map().keys())
+        def _strip(vname):  # "foo:0" -> "foo"
+            return vname.split(':')[0]
+        not_restored = [v for v in tf.compat.v1.global_variables() if _strip(v.name) not in ckpt_vars]
+        not_restored_room = [v for v in not_restored if any(k in v.name.lower() for k in ['room','rm','score1','logits1'])]
+        if len(not_restored_room) > 0:
+            print('[INFO] room-head vars NOT restored:', len(not_restored_room))
+            for v in not_restored_room[:10]:
+                print('   missing:', v.name)
+            # ---- よくある命名の入れ替えを推測して再復元（score1<->score2 / logits1<->logits2）----
+            name_map = {}
+            for v in not_restored_room:
+                vn = _strip(v.name)
+                # 候補1: score1 -> score2
+                cand = vn.replace('score1', 'score2')
+                if cand in ckpt_vars:
+                    name_map[cand] = v
+                    continue
+                # 候補2: logits1 -> logits2
+                cand = vn.replace('logits1', 'logits2')
+                if cand in ckpt_vars:
+                    name_map[cand] = v
+                    continue
+                # 候補3: room -> boundary / rm -> bd / cw
+                for a,b in [('room','boundary'),('rm','bd'),('room','cw')]:
+                    cand = vn.replace(a, b)
+                    if cand in ckpt_vars:
+                        name_map[cand] = v
+                        break
+            if len(name_map) > 0:
+                print('[INFO] try remap & restore for room-head:', len(name_map))
+                saver_swap = tf.compat.v1.train.Saver(var_list=name_map)
+                saver_swap.restore(sess, ckpt_path)
+            else:
+                print('[WARN] no remap candidate found for room-head vars')
 
         # 一枚ずつ推論
         paths = open(self.eval_file, "r").read().splitlines()
@@ -253,6 +293,7 @@ class MODEL(Network):
             # ===============================================
 
             # forward() の戻り順が [boundary, room] のため入れ替える
+            # boundary は出ているため、room 側は logits2 から受ける仮定を継続
             logit_rm, logit_bd = sess.run([logits2, logits1], feed_dict={x: im_x})
             # (1,H,W,C) → (H,W)
             out1 = np.argmax(logit_rm[0], axis=-1).astype(np.uint8)
@@ -260,11 +301,8 @@ class MODEL(Network):
             # --- quick check (一度だけで可) ---
             uniq1 = np.unique(out1)
             uniq2 = np.unique(out2)
-            print("rooms unique[:10] =", uniq1[:10], " min/max=", out1.min(), out1.max(),
-                  "| (rm from logits2)")
-            print("boundary unique[:10] =", uniq2[:10], " min/max=", out2.min(), out2.max(),
-                  "| (bd from logits1)")
-
+            print("rooms unique[:10] =", uniq1[:10], " min/max=", out1.min(), out1.max(), "| (rm from logits2)")
+            print("boundary unique[:10] =", uniq2[:10], " min/max=", out2.min(), out2.max(), "| (bd from logits1)")
             if resize:
                 # 先に「整数ラベル」を最近傍で元サイズへ→その後に色付け
                 room_label = out1
