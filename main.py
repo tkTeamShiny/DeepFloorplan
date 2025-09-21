@@ -61,7 +61,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--phase", type=str, default="Test", help="Train/Test network.")
 
 
-# ---- ヘルパー（evaluate の安全化用） ----
+# ---- ヘルパー（evaluate の安全化用）----
 def _squeeze_hw1(x):
     """(H,W,1)->(H,W) に潰す。その他はそのまま返す。"""
     x = np.asarray(x)
@@ -140,7 +140,7 @@ class MODEL(Network):
             loss += w * tf.reduce_mean(-tf.reduce_sum(y_c * log_z, axis=1))
         return loss / num_classes  # mean
 
-    def train(self, loader_dict, num_batch, max_step=1000): #max_step=40000
+    def train(self, loader_dict, num_batch, max_step=1000):  # max_step=40000
         images = loader_dict["images"]
         labels_r_hot = loader_dict["label_rooms"]
         labels_cw_hot = loader_dict["label_boundaries"]
@@ -239,40 +239,79 @@ class MODEL(Network):
         # ----- 復元できていない変数を確認（特に room ヘッド） -----
         reader = tf.compat.v1.train.NewCheckpointReader(ckpt_path)
         ckpt_vars = set(reader.get_variable_to_shape_map().keys())
+
         def _strip(vname):  # "foo:0" -> "foo"
-            return vname.split(':')[0]
+            return vname.split(":")[0]
+
         not_restored = [v for v in tf.compat.v1.global_variables() if _strip(v.name) not in ckpt_vars]
-        not_restored_room = [v for v in not_restored if any(k in v.name.lower() for k in ['room','rm','score1','logits1'])]
+        not_restored_room = [
+            v for v in not_restored if any(k in v.name.lower() for k in ["room", "rm", "score1", "logits1"])
+        ]
         if len(not_restored_room) > 0:
-            print('[INFO] room-head vars NOT restored:', len(not_restored_room))
+            print("[INFO] room-head vars NOT restored:", len(not_restored_room))
             for v in not_restored_room[:10]:
-                print('   missing:', v.name)
+                print("   missing:", v.name)
             # ---- よくある命名の入れ替えを推測して再復元（score1<->score2 / logits1<->logits2）----
             name_map = {}
             for v in not_restored_room:
                 vn = _strip(v.name)
                 # 候補1: score1 -> score2
-                cand = vn.replace('score1', 'score2')
+                cand = vn.replace("score1", "score2")
                 if cand in ckpt_vars:
                     name_map[cand] = v
                     continue
                 # 候補2: logits1 -> logits2
-                cand = vn.replace('logits1', 'logits2')
+                cand = vn.replace("logits1", "logits2")
                 if cand in ckpt_vars:
                     name_map[cand] = v
                     continue
                 # 候補3: room -> boundary / rm -> bd / cw
-                for a,b in [('room','boundary'),('rm','bd'),('room','cw')]:
+                for a, b in [("room", "boundary"), ("rm", "bd"), ("room", "cw")]:
                     cand = vn.replace(a, b)
                     if cand in ckpt_vars:
                         name_map[cand] = v
                         break
             if len(name_map) > 0:
-                print('[INFO] try remap & restore for room-head:', len(name_map))
+                print("[INFO] try remap & restore for room-head:", len(name_map))
                 saver_swap = tf.compat.v1.train.Saver(var_list=name_map)
                 saver_swap.restore(sess, ckpt_path)
             else:
-                print('[WARN] no remap candidate found for room-head vars')
+                print("[WARN] no remap candidate found for room-head vars]")
+
+        # ---- boundary→rooms フォールバック（囲まれた領域を部屋として塗り分け）----
+        def _rooms_from_boundary(bd_label, min_area=200):
+            """
+            bd_label: 0=背景, 1=door/window, 2=close wall を想定
+            壁(=2) を太らせて閉領域を作り、連結成分で部屋IDを付与（1..）。小面積は除外。
+            戻り値: (H,W) uint8 の部屋ラベル（0は背景）
+            """
+            import cv2
+
+            bd = (bd_label == 2).astype(np.uint8) * 255  # 壁だけ
+            # 壁を少し太らせて隙間を埋める
+            k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+            bd_dil = cv2.dilate(bd, k, iterations=1)
+            # 壁を白、内部を黒にしたマスクを作る
+            canvas = np.full(bd_dil.shape, 255, np.uint8)
+            canvas[bd_dil > 0] = 0
+            # 外枠からの穴埋めで外部領域を特定
+            h, w = canvas.shape
+            mask = np.zeros((h + 2, w + 2), np.uint8)
+            ff = canvas.copy()
+            cv2.floodFill(ff, mask, (0, 0), 128)  # 外部=128
+            # 部屋候補：canvas(255) かつ 外部でない（!=128）
+            rooms_bin = ((canvas == 255) & (ff != 128)).astype(np.uint8) * 255
+            # 連結成分でID付与
+            num, labels = cv2.connectedComponents(rooms_bin)
+            out = np.zeros_like(labels, dtype=np.uint8)
+            cur_id = 1
+            for lab in range(1, num):
+                area = np.sum(labels == lab)
+                if area < min_area:
+                    continue
+                out[labels == lab] = cur_id
+                cur_id = (cur_id + 1) % 8 or 1  # 1..7を回して可視化色を散らす
+            return out
 
         # 一枚ずつ推論
         paths = open(self.eval_file, "r").read().splitlines()
@@ -281,55 +320,72 @@ class MODEL(Network):
             im = imread(p, mode="RGB")
             # 入力は連続値画像なので LINEAR で縮小（NEAREST だと特徴が潰れて予測が背景0に寄りやすい）
             import cv2
+
             im_x = cv2.resize(im, (512, 512), interpolation=cv2.INTER_LINEAR) / 255.0
 
             # ====== reshape前の最小安全化（1ch→3ch対応）======
             im_x = np.asarray(im_x)
-            if im_x.ndim == 2:            # (H, W) → (H, W, 1)
+            if im_x.ndim == 2:  # (H, W) → (H, W, 1)
                 im_x = im_x[..., None]
-            if im_x.shape[-1] == 1:       # 1ch → 3ch 複製
+            if im_x.shape[-1] == 1:  # 1ch → 3ch 複製
                 im_x = np.repeat(im_x, 3, axis=-1)
             im_x = im_x.reshape(1, 512, 512, 3)
             # ===============================================
 
-            # forward() の戻り順が [boundary, room] のため入れ替える
-            # boundary は出ているため、room 側は logits2 から受ける仮定を継続
+            # まずは元の想定：rooms=logits2, boundary=logits1
             logit_rm, logit_bd = sess.run([logits2, logits1], feed_dict={x: im_x})
             # (1,H,W,C) → (H,W)
             out1 = np.argmax(logit_rm[0], axis=-1).astype(np.uint8)
             out2 = np.argmax(logit_bd[0], axis=-1).astype(np.uint8)
-            # --- quick check (一度だけで可) ---
+
+            # --- quick check ---
             uniq1 = np.unique(out1)
             uniq2 = np.unique(out2)
-            print("rooms unique[:10] =", uniq1[:10], " min/max=", out1.min(), out1.max(), "| (rm from logits2)")
-            print("boundary unique[:10] =", uniq2[:10], " min/max=", out2.min(), out2.max(), "| (bd from logits1)")
+            print(
+                "rooms unique[:10] =",
+                uniq1[:10],
+                " min/max=",
+                out1.min(),
+                out1.max(),
+                "| (rm from logits2)",
+            )
+            print(
+                "boundary unique[:10] =",
+                uniq2[:10],
+                " min/max=",
+                out2.min(),
+                out2.max(),
+                "| (bd from logits1)",
+            )
+
             if resize:
                 # 先に「整数ラベル」を最近傍で元サイズへ→その後に色付け
                 room_label = out1
-                bd_label   = out2
-                import cv2
+                bd_label = out2
                 room_label = cv2.resize(
-                    room_label, (im.shape[1], im.shape[0]),
-                    interpolation=cv2.INTER_NEAREST
+                    room_label, (im.shape[1], im.shape[0]), interpolation=cv2.INTER_NEAREST
                 )
                 bd_label = cv2.resize(
-                    bd_label, (im.shape[1], im.shape[0]),
-                    interpolation=cv2.INTER_NEAREST
+                    bd_label, (im.shape[1], im.shape[0]), interpolation=cv2.INTER_NEAREST
                 )
+                # rooms が全0なら boundary から再構成
+                if np.unique(room_label).size == 1 and room_label.flat[0] == 0:
+                    room_label = _rooms_from_boundary(bd_label)
                 out1_rgb = ind2rgb(room_label)
                 out2_rgb = ind2rgb(bd_label, color_map=floorplan_boundary_map)
             else:
-                out1_rgb = ind2rgb(out1)
-                out2_rgb = ind2rgb(out2, color_map=floorplan_boundary_map)
+                # rooms が全0なら boundary から再構成
+                room_label = out1
+                bd_label = out2
+                if np.unique(room_label).size == 1 and room_label.flat[0] == 0:
+                    room_label = _rooms_from_boundary(bd_label)
+                out1_rgb = ind2rgb(room_label)
+                out2_rgb = ind2rgb(bd_label, color_map=floorplan_boundary_map)
 
             if merge:
                 # マージも「ラベル」で行ってから色付け
-                out1i = out1.copy()
-                out2i = out2.copy()
-                if resize:
-                    import cv2
-                    out1i = cv2.resize(out1i, (im.shape[1], im.shape[0]), interpolation=cv2.INTER_NEAREST)
-                    out2i = cv2.resize(out2i, (im.shape[1], im.shape[0]), interpolation=cv2.INTER_NEAREST)
+                out1i = room_label.copy()
+                out2i = bd_label.copy()
                 out1i[out2i == 2] = 10
                 out1i[out2i == 1] = 9
                 out3_rgb = ind2rgb(out1i, color_map=floorplan_fuse_map)
@@ -367,9 +423,9 @@ class MODEL(Network):
 
             # ====== reshape前の最小安全化（1ch→3ch対応）======
             im = np.asarray(im)
-            if im.ndim == 2:            # (H, W) → (H, W, 1)
-                im = im[..., None]
-            if im.shape[-1] == 1:       # 1ch → 3ch 複製
+            if im.ndim == 2:  # (H, W) → (H, W, 1)
+                im = im[..., 0:1]
+            if im.shape[-1] == 1:  # 1ch → 3ch 複製
                 im = np.repeat(im, 3, axis=-1)
             im = im.reshape(1, 512, 512, 3)
             # ===============================================
